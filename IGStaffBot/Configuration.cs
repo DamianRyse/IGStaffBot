@@ -1,12 +1,19 @@
-﻿using System.Text;
-using Newtonsoft.Json;
+﻿using System.Text.Json;
+using System.Text.Json.Serialization;
+using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace IGStaffBot;
 
-internal class Configuration
+public class Configuration
 {
-    internal string DiscordToken { get; }
+    [JsonPropertyName("B64_DiscordToken")]
+    public string DiscordToken { get; set; }
 
+    public List<Event> Events { get; set; }
+    public ulong AuditLogDestinationGuildId { get; set; }
+    public ulong AuditLogDestinationChannelId { get; set; }
+
+   
     /// <summary>
     /// Reads the configuration file and deserializes it to a Configuration class object.
     /// </summary>
@@ -14,10 +21,53 @@ internal class Configuration
     /// <returns>Deserialized program configuration</returns>
     internal static Configuration ReadFromFile(string filePath)
     {
-        using var file = File.OpenText(filePath);
-        var serializer = new JsonSerializer();
-        var conf = (Configuration)serializer.Deserialize(file, typeof(Configuration))!;
+        // Specify an option to deserialize Enums
+        var options = new JsonSerializerOptions();
+        options.Converters.Add(new JsonStringEnumConverter());
         
-        return conf;
+        // open a file stream and try to deserialize the content.
+        // If the content can't be parsed, return null.
+        using var file = File.OpenText(filePath);
+        try
+        {
+            return JsonSerializer.Deserialize<Configuration>(file.ReadToEnd(), options);
+        }
+        catch(Exception ex)
+        {
+            Console.WriteLine($"[{DateTime.UtcNow} UTC] {ex.Message}");
+            Console.WriteLine($"[{DateTime.UtcNow} UTC] {ex.StackTrace}");
+            return new Configuration
+            {
+                DiscordToken = "NO_DISCORD_TOKEN",
+                Events = new List<Event>()
+            };
+        }
+    }
+
+    public enum EventType
+    {
+        UserJoined,
+        UserLeft,
+        UserBanned,
+        UserUnbanned,
+        RoleCreated,
+        RoleDeleted,
+        RoleUpdated,
+        GuildUpdated,
+        AuditLog
+    }
+
+    public class Event
+    {
+        public EventType EventType { get; set; }
+        public ulong SourceDiscordId { get; set; }
+        public ulong DestinationDiscordId { get; set; }
+        public ulong DestinationChannelId { get; set; }
+        public bool IsEnabled { get; set; }
+
+        public Event()
+        {
+            
+        }
     }
 }
