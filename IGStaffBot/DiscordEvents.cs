@@ -111,16 +111,24 @@ internal class DiscordEvents
                 case RoleUpdateAuditLogData:
                     await RoleUpdateAuditLogHandler(log, guild, ev);
                     break;
-                // Delete role
+                case RoleDeleteAuditLogData:
+                    await RoleDeleteAuditLogHandler(log, guild, ev);
+                    break;
                 case InviteCreateAuditLogData:
                     await InviteCreatedLogHandler(log,guild, ev);
                     break;
                 case InviteDeleteAuditLogData:
                     await InviteDeleteAuditLogHandler(log, guild, ev);
                     break;
-                // Create Webhook
-                // Update Webhook
-                // Delete Webhook
+                case WebhookCreateAuditLogData:
+                    await WebhookCreateAuditLogHandler(log, guild, ev);
+                    break;
+                case WebhookUpdateAuditLogData:
+                    await WebhookUpdateAuditLogHandler(log, guild, ev);
+                    break;
+                case WebhookDeleteAuditLogData:
+                    await WebhookDeleteAuditLogHandler(log, guild, ev);
+                    break;
                 // Create Emoji
                 // Update Emoji
                 // Delete Emoji
@@ -470,6 +478,25 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
+    private async Task RoleDeleteAuditLogHandler(RestAuditLogEntry data, SocketGuild guild, Configuration.Event discordEvent)
+    {
+        // Convert the Audit Log to it's class
+        var auditLog = (RoleDeleteAuditLogData)data.Data;
+
+        // Get the guilds and channels
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
+        
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} deleted role: {auditLog.Properties.Name}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}")
+            .WithColor(Color.Red)
+            .WithImageUrl(guild.IconUrl);
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
     private async Task BanAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
     {
         // Convert the Audit Log to it's class
@@ -671,6 +698,74 @@ internal class DiscordEvents
                              $"**Usages:** {auditLog.Uses}/{auditLog.MaxUses}\n" +
                              $"**Valid until:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime.AddSeconds(auditLog.MaxAge)).ToString()}")
             .WithColor(Color.Gold)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task WebhookCreateAuditLogHandler(RestAuditLogEntry data,SocketGuild guild, Configuration.Event discordEvent)
+    {
+        // Convert the Audit Log to it's class
+        var auditLog = (WebhookCreateAuditLogData)data.Data;
+        
+        // Get the guilds and channels
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
+        
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} created a webhook: {auditLog.Name}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
+                             $"**In channel:** {guild.GetChannel(auditLog.ChannelId).Name}")
+            .WithColor(Color.Green)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task WebhookUpdateAuditLogHandler(RestAuditLogEntry data,SocketGuild guild, Configuration.Event discordEvent)
+    {
+        // Convert the Audit Log to it's class
+        var auditLog = (WebhookUpdateAuditLogData)data.Data;
+        
+        // Get the guilds and channels
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
+        
+        // Prepare changelog
+        var changelog = new StringBuilder();
+        if (auditLog.Before.Name != auditLog.After.Name)
+            changelog.AppendLine($"Changed name to: {auditLog.After.Name}");
+        if (auditLog.Before.Avatar != auditLog.After.Avatar)
+            changelog.AppendLine($"Changed avatar of the webhook");
+
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} updated a webhook: {auditLog.Before.Name}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
+                             $"**In channel:** {guild.GetChannel(auditLog.Before.ChannelId ?? 0)?.Name}\n" +
+                             $"{changelog.ToString()}")
+            .WithColor(Color.Gold)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task WebhookDeleteAuditLogHandler(RestAuditLogEntry data,SocketGuild guild, Configuration.Event discordEvent)
+    {
+        // Convert the Audit Log to it's class
+        var auditLog = (WebhookDeleteAuditLogData)data.Data;
+        
+        // Get the guilds and channels
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
+        
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} deleted a webhook: {auditLog.Name}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
+                             $"**In channel:** {guild.GetChannel(auditLog.ChannelId)?.Name}")
+            .WithColor(Color.Red)
             .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
