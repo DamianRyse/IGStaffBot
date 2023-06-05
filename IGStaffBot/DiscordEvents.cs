@@ -166,7 +166,6 @@ internal class DiscordEvents
                     
                     // Post default message
                     await destinationChannel.SendMessageAsync($"{TimestampTag.FromDateTime(log.CreatedAt.LocalDateTime)} {log.User.Username}: {log.Action} *(Unhandled audit log format)*");
-                    _auditLogIdCache.Add(log.Id);
                     break;
             }
             
