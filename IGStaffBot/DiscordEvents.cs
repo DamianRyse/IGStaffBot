@@ -46,6 +46,9 @@ internal class DiscordEvents
             
             switch (log.Data)
             {
+                case ChannelCreateAuditLogData:
+                    await ChannelCreateAuditLogHandler(log, guild);
+                    break;
                 case RoleUpdateAuditLogData:
                     await RoleUpdateAuditLogHandler(log, guild);
                     break;
@@ -93,6 +96,35 @@ internal class DiscordEvents
         }
     }
 
+    private async Task ChannelCreateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    {
+        // Find the event
+        var ev = _configuration.Events.First(x =>
+            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        
+        // Convert the Audit Log to it's class
+        var auditLog = (ChannelCreateAuditLogData)data.Data;
+
+        // Get the guilds, channels and users
+        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} created a channel: {auditLog.ChannelName}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
+                             $"**Type:** {auditLog.ChannelType}" +
+                             $"**Channel ID:** {auditLog.ChannelId}" +
+                             $"**NSFW:** {(auditLog.IsNsfw.HasValue ? (auditLog.IsNsfw.Value ? "Yes" : "No") : "n/a")}" +
+                             $"**Audio bitrate:** {(auditLog.Bitrate.HasValue ? auditLog.Bitrate.Value + " kbps" : "n/a")}" +
+                             $"**Slow mode:** {(auditLog.SlowModeInterval.HasValue ? auditLog.SlowModeInterval.Value + " s" : "n/a")}")
+                            // TODO: add the permission overwrites
+            .WithColor(Color.Green)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
     private async Task RoleUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
     {
         // Find the event
@@ -211,7 +243,7 @@ internal class DiscordEvents
 
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} updated guild settings")
+        emb.WithTitle($"{data.User.Username} updated role: {auditLog.Before.Name}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"{changelog.ToString()}")
             .WithColor(Color.Red)
@@ -219,6 +251,7 @@ internal class DiscordEvents
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
+    
     private async Task BanAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
     {
         // Find the event
