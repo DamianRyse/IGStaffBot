@@ -46,17 +46,32 @@ internal class DiscordEvents
             
             switch (log.Data)
             {
+                case GuildUpdateAuditLogData:
+                    await GuildUpdateAuditLogHandler(log, guild);
+                    break;
                 case ChannelCreateAuditLogData:
                     await ChannelCreateAuditLogHandler(log, guild);
                     break;
-                case RoleUpdateAuditLogData:
-                    await RoleUpdateAuditLogHandler(log, guild);
+                case ChannelUpdateAuditLogData:
+                    await ChannelUpdateAuditLogHandler(log, guild);
                     break;
-                case MemberRoleAuditLogData:
-                    await MemberRoleAuditLogHandler(log,guild);
+                case ChannelDeleteAuditLogData:
+                    await ChannelDeleteAuditLogHandler(log, guild);
+                    break;
+                case OverwriteCreateAuditLogData:
+                    await OverwriteCreateAuditLogHandler(log, guild);
+                    break;
+                case OverwriteUpdateAuditLogData:
+                    await OverwriteUpdateAuditLogHandler(log, guild);
+                    break;
+                case OverwriteDeleteAuditLogData:
+                    await OverwriteDeleteAuditLogHandler(log, guild);
                     break;
                 case KickAuditLogData:
                     await KickAuditLogHandler(log,guild);
+                    break;
+                case PruneAuditLogData:
+                    await PruneAuditLogHandler(log, guild);
                     break;
                 case BanAuditLogData:
                     await BanAuditLogHandler(log, guild);
@@ -64,18 +79,62 @@ internal class DiscordEvents
                 case UnbanAuditLogData:
                     await UnbanAuditLogHandler(log, guild);
                     break;
+                case MemberUpdateAuditLogData:
+                    await MemberUpdateAuditLogHandler(log, guild);
+                    break;
+                case MemberRoleAuditLogData:
+                    await MemberRoleAuditLogHandler(log,guild);
+                    break;
+                // Move Member
+                // Disconnect Member
+                // Add Bot
+                // Create Thread
+                // Update Thread
+                // Delete Thread
+                // Create role
+                case RoleUpdateAuditLogData:
+                    await RoleUpdateAuditLogHandler(log, guild);
+                    break;
+                // Delete role
                 case InviteCreateAuditLogData:
                     await InviteCreatedLogHandler(log,guild);
                     break;
                 case InviteDeleteAuditLogData:
                     await InviteDeleteAuditLogHandler(log, guild);
                     break;
-                case GuildUpdateAuditLogData:
-                    await GuildUpdateAuditLogHandler(log, guild);
-                    break;
-                case MemberUpdateAuditLogData:
-                    await MemberUpdateAuditLogHandler(log, guild);
-                    break;
+                // Create Webhook
+                // Update Webhook
+                // Delete Webhook
+                // Create Emoji
+                // Update Emoji
+                // Delete Emoji
+                // Delete Messages
+                // Bulk Delete Messages
+                // Pin Message
+                // Unpin Message
+                // Create Integration
+                // Update Integration
+                // Delete Integration
+                // Create Sticker
+                // Update Sticker
+                // Delete Sticker
+                // Start Stage
+                // Update Stage
+                // End Stage
+                // Create Event
+                // Update Event
+                // Cancel Event
+                // Update Command Permission
+                // AutoMod Block Message
+                // Create AutoMod Rule
+                // Update AutoMod Rule
+                // Cancel AutoMod Rule
+                // Feature Item on Home
+                // Remove Item from Home
+                // Create Soundboard Sound
+                // Update Soundboard Sound
+                // Delete Soundboard Sound
+        
                 default:
                     // Find the event
                     var ev = _configuration.Events.First(x =>
@@ -113,13 +172,170 @@ internal class DiscordEvents
         var emb = new EmbedBuilder();
         emb.WithTitle($"{data.User.Username} created a channel: {auditLog.ChannelName}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
-                             $"**Type:** {auditLog.ChannelType}" +
-                             $"**Channel ID:** {auditLog.ChannelId}" +
-                             $"**NSFW:** {(auditLog.IsNsfw.HasValue ? (auditLog.IsNsfw.Value ? "Yes" : "No") : "n/a")}" +
-                             $"**Audio bitrate:** {(auditLog.Bitrate.HasValue ? auditLog.Bitrate.Value + " kbps" : "n/a")}" +
+                             $"**Type:** {auditLog.ChannelType}\n" +
+                             $"**Channel ID:** {auditLog.ChannelId}\n" +
+                             $"**NSFW:** {(auditLog.IsNsfw.HasValue ? (auditLog.IsNsfw.Value ? "Yes" : "No") : "n/a")}\n" +
+                             $"**Audio bitrate:** {(auditLog.Bitrate.HasValue ? auditLog.Bitrate.Value + " kbps" : "n/a")}\n" +
                              $"**Slow mode:** {(auditLog.SlowModeInterval.HasValue ? auditLog.SlowModeInterval.Value + " s" : "n/a")}")
                             // TODO: add the permission overwrites
             .WithColor(Color.Green)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task ChannelUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    {
+        // Find the event
+        var ev = _configuration.Events.First(x =>
+            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        
+        // Convert the Audit Log to it's class
+        var auditLog = (ChannelUpdateAuditLogData)data.Data;
+
+        // Get the guilds, channels and users
+        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        
+        //Prepare changelog
+        var changelog = new StringBuilder();
+        if (auditLog.Before.Name != auditLog.After.Name)
+            changelog.AppendLine($"Changed name to: {auditLog.After.Name}");
+        if (auditLog.Before.Bitrate.HasValue && auditLog.After.Bitrate.HasValue && (auditLog.Before.Bitrate.Value != auditLog.After.Bitrate.Value))
+            changelog.AppendLine($"Changed bitrate to: {auditLog.After.Bitrate.Value} kbps");
+        if (auditLog.Before.IsNsfw.HasValue && auditLog.After.IsNsfw.HasValue && (auditLog.Before.IsNsfw.Value != auditLog.After.IsNsfw.Value))
+            changelog.AppendLine(auditLog.After.IsNsfw.Value ? "Turned on NSFW mode" : "Turned off NSFW mode");
+        if (auditLog.Before.SlowModeInterval.HasValue && auditLog.After.SlowModeInterval.HasValue && 
+            auditLog.Before.SlowModeInterval.Value != auditLog.After.SlowModeInterval.Value)
+            changelog.AppendLine($"Changed slow mode delay to {auditLog.After.SlowModeInterval.Value} seconds");
+        if (auditLog.Before.Topic != auditLog.After.Topic)
+            changelog.AppendLine($"Changed the topic to: {auditLog.After.Topic}");
+
+
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} updated a channel: {auditLog.Before.Name}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
+                             $"{changelog.ToString()}")
+            .WithColor(Color.Gold)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task ChannelDeleteAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    {
+        // Find the event
+        var ev = _configuration.Events.First(x =>
+            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        
+        // Convert the Audit Log to it's class
+        var auditLog = (ChannelDeleteAuditLogData)data.Data;
+
+        // Get the guilds, channels and users
+        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} deleted a channel: {auditLog.ChannelName}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
+                             $"**Channel ID:** {auditLog.ChannelId}\n" +
+                             $"**Type**: {auditLog.ChannelType}")
+            .WithColor(Color.Red)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task OverwriteCreateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    {
+        // Find the event
+        var ev = _configuration.Events.First(x =>
+            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        
+        // Convert the Audit Log to it's class
+        var auditLog = (OverwriteCreateAuditLogData)data.Data;
+
+        // Get the guilds, channels and users
+        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} created channel permissions for: {guild.GetChannel(auditLog.ChannelId)?.Name}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}")
+            .WithColor(Color.Green)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task OverwriteUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    {
+        // Find the event
+        var ev = _configuration.Events.First(x =>
+            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        
+        // Convert the Audit Log to it's class
+        var auditLog = (OverwriteUpdateAuditLogData)data.Data;
+
+        // Get the guilds, channels and users
+        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} updated channel permissions for: {guild.GetChannel(auditLog.ChannelId)?.Name}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}")
+            .WithColor(Color.Gold)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+
+    private async Task OverwriteDeleteAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    {
+        // Find the event
+        var ev = _configuration.Events.First(x =>
+            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        
+        // Convert the Audit Log to it's class
+        var auditLog = (OverwriteDeleteAuditLogData)data.Data;
+
+        // Get the guilds, channels and users
+        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} deleted channel permissions for: {guild.GetChannel(auditLog.ChannelId)?.Name}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}")
+            .WithColor(Color.Red)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task PruneAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    {
+        // Find the event
+        var ev = _configuration.Events.First(x =>
+            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        
+        // Convert the Audit Log to it's class
+        var auditLog = (PruneAuditLogData)data.Data;
+
+        // Get the guilds, channels and users
+        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} pruned {auditLog.MembersRemoved} members")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
+                             $"**Threshold days**: {auditLog.PruneDays}")
+            .WithColor(Color.Red)
             .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
