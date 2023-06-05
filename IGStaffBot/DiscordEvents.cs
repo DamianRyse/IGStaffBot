@@ -4,6 +4,7 @@ using System.Text;
 using Discord;
 using Discord.Rest;
 using Discord.WebSocket;
+// ReSharper disable SuggestBaseTypeForParameter
 
 namespace IGStaffBot;
 
@@ -30,6 +31,10 @@ internal class DiscordEvents
         }
     }
 
+    /// <summary>
+    /// Reads the audit log of a specific guild. It also casts the audit logs into specific types and calls the handler (if available).
+    /// </summary>
+    /// <param name="guild"></param>
     public async Task ReadAuditLogAsync(SocketGuild guild)
     {
         var auditLog = guild.GetAuditLogsAsync(5).FlattenAsync().Result.OrderBy(x=>x.CreatedAt);
@@ -41,30 +46,39 @@ internal class DiscordEvents
             
             switch (log.Data)
             {
+                case RoleUpdateAuditLogData:
+                    await RoleUpdateAuditLogHandler(log, guild);
+                    break;
                 case MemberRoleAuditLogData:
-                    await ProcessMemberRoleAuditLog(log,guild);
+                    await MemberRoleAuditLogHandler(log,guild);
                     break;
                 case KickAuditLogData:
-                    await ProcessKickAuditLog(log,guild);
+                    await KickAuditLogHandler(log,guild);
+                    break;
+                case BanAuditLogData:
+                    await BanAuditLogHandler(log, guild);
+                    break;
+                case UnbanAuditLogData:
+                    await UnbanAuditLogHandler(log, guild);
                     break;
                 case InviteCreateAuditLogData:
-                    await ProcessInviteCreatedLog(log,guild);
+                    await InviteCreatedLogHandler(log,guild);
                     break;
                 case InviteDeleteAuditLogData:
-                    await ProcessInviteDeleteAuditLog(log, guild);
+                    await InviteDeleteAuditLogHandler(log, guild);
                     break;
                 case GuildUpdateAuditLogData:
-                    await ProcessGuildUpdateAuditLog(log, guild);
+                    await GuildUpdateAuditLogHandler(log, guild);
                     break;
                 case MemberUpdateAuditLogData:
-                    await ProcessMemberUpdateAuditLog(log, guild);
+                    await MemberUpdateAuditLogHandler(log, guild);
                     break;
                 default:
                     // Find the event
                     var ev = _configuration.Events.First(x =>
                         x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
                     
-                    // Get the guilds, channels and users
+                    // Get the guilds and users
                     var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
                     var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
                     
@@ -73,11 +87,187 @@ internal class DiscordEvents
                     _auditLogIdCache.Add(log.Id);
                     break;
             }
+            
+            // After handling the audit log, we add the ID to a cache list, so it won't be processed another time
+            _auditLogIdCache.Add(log.Id);
         }
     }
 
+    private async Task RoleUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    {
+        // Find the event
+        var ev = _configuration.Events.First(x =>
+            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        
+        // Convert the Audit Log to it's class
+        var auditLog = (RoleUpdateAuditLogData)data.Data;
+
+        // Get the guilds and channels
+        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        
+        // Compare the changes and add only the changed objects to a StringBuilder
+        var changelog = new StringBuilder();
+        if (auditLog.Before.Name != auditLog.After.Name)
+            changelog.AppendLine($"Changed name to: {auditLog.After.Name}");
+        if (auditLog.Before.Color != auditLog.After.Color)
+            changelog.AppendLine($"Set color to: {auditLog.After.Color}");
+        if (auditLog.Before.Hoist != auditLog.After.Hoist)
+            if(auditLog.After.Hoist.HasValue)
+                changelog.AppendLine(auditLog.After.Hoist.Value ? "Hoisted the role" : "Depressed the role");
+        if (auditLog.Before.Mentionable != auditLog.After.Mentionable)
+            if (auditLog.After.Mentionable.HasValue)
+                changelog.AppendLine(auditLog.After.Mentionable.Value ? "Set role to mentionable" : "Set role to not-mentionable");
+        if (auditLog.Before.Permissions.HasValue && auditLog.After.Permissions.HasValue)
+        {
+            var permsBefore = auditLog.Before.Permissions.Value;
+            var permsAfter = auditLog.After.Permissions.Value;
+            if (permsBefore.Administrator != permsAfter.Administrator)
+                changelog.AppendLine(permsAfter.Administrator
+                    ? "Gave Administrator privileges"
+                    : "Revoked Administrator privileges");
+            if (permsBefore.Connect != permsAfter.Connect)
+                changelog.AppendLine(permsAfter.Connect ? "Gave 'Connect' permission" : "Revoked 'Connect' permission");
+            if (permsBefore.Speak != permsAfter.Speak)
+                changelog.AppendLine(permsAfter.Speak ? "Gave 'Speak' permission" : "Revoked 'Speak' permission");
+            if (permsBefore.Stream != permsAfter.Stream)
+                changelog.AppendLine(permsAfter.Stream ? "Gave 'Stream' permission" : "Revoked 'Stream' permission");
+            if (permsBefore.AddReactions != permsAfter.AddReactions)
+                changelog.AppendLine(permsAfter.AddReactions ? "Gave 'Add Reactions' permission" : "Revoked 'Add Reactions' permission");
+            if (permsBefore.AttachFiles != permsAfter.AttachFiles)
+                changelog.AppendLine(permsAfter.AttachFiles ? "Gave 'Attach Files' permission" : "Revoked 'Attach Files' permission");
+            if (permsBefore.BanMembers != permsAfter.BanMembers)
+                changelog.AppendLine(permsAfter.BanMembers ? "Gave 'Ban Members' permission" : "Revoked 'Ban Members' permission");
+            if (permsBefore.ChangeNickname != permsAfter.ChangeNickname)
+                changelog.AppendLine(permsAfter.ChangeNickname ? "Gave 'Change Nickname' permission" : "Revoked 'Change Nickname' permission");
+            if (permsBefore.DeafenMembers != permsAfter.DeafenMembers)
+                changelog.AppendLine(permsAfter.DeafenMembers ? "Gave 'Deafen Members' permission" : "Revoked 'Deafen Members' permission");
+            if (permsBefore.EmbedLinks != permsAfter.EmbedLinks)
+                changelog.AppendLine(permsAfter.EmbedLinks ? "Gave 'Embed Links' permission" : "Revoked 'Embed Links' permission");
+            if (permsBefore.KickMembers != permsAfter.KickMembers)
+                changelog.AppendLine(permsAfter.KickMembers ? "Gave 'Kick Members' permission" : "Revoked 'Kick Members' permission");
+            if (permsBefore.ManageChannels != permsAfter.ManageChannels)
+                changelog.AppendLine(permsAfter.ManageChannels ? "Gave 'Manage Channels' permission" : "Revoked 'Manage Channels' permission");
+            if (permsBefore.ManageEvents != permsAfter.ManageEvents)
+                changelog.AppendLine(permsAfter.ManageEvents ? "Gave 'Manage Events' permission" : "Revoked 'Manage Events' permission");
+            if (permsBefore.ManageGuild != permsAfter.ManageGuild)
+                changelog.AppendLine(permsAfter.ManageGuild ? "Gave 'Manage Guild' permission" : "Revoked 'Manage Guild' permission");
+            if (permsBefore.ManageMessages != permsAfter.ManageMessages)
+                changelog.AppendLine(permsAfter.ManageMessages ? "Gave 'Manage Messages' permission" : "Revoked 'Manage Messages' permission");
+            if (permsBefore.ManageNicknames != permsAfter.ManageNicknames)
+                changelog.AppendLine(permsAfter.ManageNicknames ? "Gave 'Manage Nicknames' permission" : "Revoked 'Manage Nicknames' permission");
+            if (permsBefore.ManageRoles != permsAfter.ManageRoles)
+                changelog.AppendLine(permsAfter.ManageRoles ? "Gave 'Manage Roles' permission" : "Revoked 'Manage Roles' permission");
+            if (permsBefore.ManageThreads != permsAfter.ManageThreads)
+                changelog.AppendLine(permsAfter.ManageThreads ? "Gave 'Manage Threads' permission" : "Revoked 'Manage Threads' permission");
+            if (permsBefore.ManageWebhooks != permsAfter.ManageWebhooks)
+                changelog.AppendLine(permsAfter.ManageWebhooks ? "Gave 'Manage Webhooks' permission" : "Revoked 'Manage Webhooks' permission");
+            if (permsBefore.MentionEveryone != permsAfter.MentionEveryone)
+                changelog.AppendLine(permsAfter.MentionEveryone ? "Role now can mention @everyone" : "Role now can't mention @everyone anymore.");
+            if (permsBefore.ModerateMembers != permsAfter.ModerateMembers)
+                changelog.AppendLine(permsAfter.ModerateMembers ? "Gave 'Moderate Members' permission" : "Revoked 'Moderate Members' permission");
+            if (permsBefore.MoveMembers != permsAfter.MoveMembers)
+                changelog.AppendLine(permsAfter.MoveMembers ? "Gave 'Move Members' permission" : "Revoked 'Move Members' permission");
+            if (permsBefore.MuteMembers != permsAfter.MuteMembers)
+                changelog.AppendLine(permsAfter.MuteMembers ? "Gave 'Mute Members' permission" : "Revoked 'Mute Members' permission");
+            if (permsBefore.PrioritySpeaker != permsAfter.PrioritySpeaker)
+                changelog.AppendLine(permsAfter.PrioritySpeaker ? "Role is now a priority speaker" : "Revoked 'Priority Speaker' privilege");
+            if (permsBefore.SendMessages != permsAfter.SendMessages)
+                changelog.AppendLine(permsAfter.SendMessages ? "Gave 'Send Messages' permission" : "Revoked 'Send Messages' privilege");
+            if (permsBefore.ViewChannel != permsAfter.ViewChannel)
+                changelog.AppendLine(permsAfter.ViewChannel ? "Gave 'View Channel' permission" : "Revoked 'View Channel' privilege");
+            if (permsBefore.CreateInstantInvite != permsAfter.CreateInstantInvite)
+                changelog.AppendLine(permsAfter.CreateInstantInvite ? "Role can now create instant invites" : "Role is now denied to create instant invites");
+            if (permsBefore.CreatePrivateThreads != permsAfter.CreatePrivateThreads)
+                changelog.AppendLine(permsAfter.CreatePrivateThreads ? "Role can now create private threads" : "Role is now denied to create private threads");
+            if (permsBefore.CreatePublicThreads != permsAfter.CreatePublicThreads)
+                changelog.AppendLine(permsAfter.CreatePublicThreads ? "Role can now create public threads" : "Role is now denied to create public threads");
+            if (permsBefore.ReadMessageHistory != permsAfter.ReadMessageHistory)
+                changelog.AppendLine(permsAfter.ReadMessageHistory ? "Gave 'Read Message History' permission" : "Revoked 'Read Message History' permission");
+            if (permsBefore.RequestToSpeak != permsAfter.RequestToSpeak)
+                changelog.AppendLine(permsAfter.RequestToSpeak ? "Gave 'Request To Speak' permission" : "Revoked 'Request To Speak' permission");
+            if (permsBefore.StartEmbeddedActivities != permsAfter.StartEmbeddedActivities)
+                changelog.AppendLine(permsAfter.StartEmbeddedActivities ? "Gave 'Start Embedded Activities' permission" : "Revoked 'Start Embedded Activities' permission");
+            if (permsBefore.UseApplicationCommands != permsAfter.UseApplicationCommands)
+                changelog.AppendLine(permsAfter.UseApplicationCommands ? "Gave 'Use Application Commands' permission" : "Revoked 'Use Application Commands' permission");
+            if (permsBefore.UseExternalEmojis != permsAfter.UseExternalEmojis)
+                changelog.AppendLine(permsAfter.UseExternalEmojis ? "Gave 'Use External Emojis' permission" : "Revoked 'Use External Emojis' permission");
+            if (permsBefore.UseExternalStickers != permsAfter.UseExternalStickers)
+                changelog.AppendLine(permsAfter.UseExternalStickers ? "Gave 'Use External Stickers' permission" : "Revoked 'Use External Stickers' permission");
+            if (permsBefore.ViewAuditLog != permsAfter.ViewAuditLog)
+                changelog.AppendLine(permsAfter.ViewAuditLog ? "Gave 'View Audit Log' permission" : "Revoked 'View Audit Log' permission");
+            if (permsBefore.ViewGuildInsights != permsAfter.ViewGuildInsights)
+                changelog.AppendLine(permsAfter.ViewGuildInsights ? "Gave 'View Guild Insights' permission" : "Revoked 'View Guild Insights' permission");
+            if (permsBefore.ManageEmojisAndStickers != permsAfter.ManageEmojisAndStickers)
+                changelog.AppendLine(permsAfter.ManageEmojisAndStickers ? "Gave 'Manage Emojis And Stickers' permission" : "Revoked 'Manage Emojis And Stickers' permission");
+            if (permsBefore.SendMessagesInThreads != permsAfter.SendMessagesInThreads)
+                changelog.AppendLine(permsAfter.SendMessagesInThreads ? "Gave 'Send Messages In Threads' permission" : "Revoked 'Send Messages In Threads' permission");
+            if (permsBefore.UseVAD != permsAfter.UseVAD)
+                changelog.AppendLine(permsAfter.UseVAD ? "Role can now use Voice-Activity-Detection." : "Role is now required to use Push-to-talk.");
+            if (permsBefore.SendTTSMessages != permsAfter.SendTTSMessages)
+                changelog.AppendLine(permsAfter.SendTTSMessages ? "Role can now send TTS messages" : "Role now is denied to send TTS messages.");
+        }
+
+
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} updated guild settings")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
+                             $"{changelog.ToString()}")
+            .WithColor(Color.Red)
+            .WithImageUrl(guild.IconUrl);
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    private async Task BanAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    {
+        // Find the event
+        var ev = _configuration.Events.First(x =>
+            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        
+        // Convert the Audit Log to it's class
+        var auditLog = (BanAuditLogData)data.Data;
+
+        // Get the guilds, channels and users
+        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} banned: {auditLog.Target.Username}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
+                             $"**Reason:** {data.Reason}")
+            .WithColor(Color.Orange)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
     
-    private async Task ProcessMemberRoleAuditLog(RestAuditLogEntry data, SocketGuild guild)
+    private async Task UnbanAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    {
+        // Find the event
+        var ev = _configuration.Events.First(x =>
+            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        
+        // Convert the Audit Log to it's class
+        var auditLog = (UnbanAuditLogData)data.Data;
+
+        // Get the guilds, channels and users
+        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} unbanned: {auditLog.Target.Username}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
+                             $"**Reason:** {data.Reason}")
+            .WithColor(Color.Orange)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task MemberRoleAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
     {
         // Find the event
         var ev = _configuration.Events.First(x =>
@@ -101,16 +291,14 @@ internal class DiscordEvents
         var emb = new EmbedBuilder();
         emb.WithTitle($"{data.User.Username} changed roles of member: {auditLog.Target.Username}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
-                             $"**In guild:** {guild.Name}\n" +
                              changelog.ToString())
             .WithColor(Color.LightGrey)
             .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
-        _auditLogIdCache.Add(data.Id);
     }
     
-    private async Task ProcessKickAuditLog(RestAuditLogEntry data, SocketGuild guild)
+    private async Task KickAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
     {
         // Find the event
         var ev = _configuration.Events.First(x =>
@@ -132,10 +320,9 @@ internal class DiscordEvents
             .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
-        _auditLogIdCache.Add(data.Id);
     }
     
-    private async Task ProcessMemberUpdateAuditLog(RestAuditLogEntry data, SocketGuild guild)
+    private async Task MemberUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
     {
         // Find the event
         var ev = _configuration.Events.First(x =>
@@ -169,10 +356,9 @@ internal class DiscordEvents
             .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
-        _auditLogIdCache.Add(data.Id);
     }
    
-    private async Task ProcessGuildUpdateAuditLog(RestAuditLogEntry data, SocketGuild guild)
+    private async Task GuildUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
     {
         // Find the event
         var ev = _configuration.Events.First(x =>
@@ -214,10 +400,9 @@ internal class DiscordEvents
             .WithImageUrl(guild.IconUrl);
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
-        _auditLogIdCache.Add(data.Id);
     }
     
-    private async Task ProcessInviteCreatedLog(RestAuditLogEntry data,SocketGuild guild)
+    private async Task InviteCreatedLogHandler(RestAuditLogEntry data,SocketGuild guild)
     {
         // Find the event
         var ev = _configuration.Events.First(x =>
@@ -242,10 +427,9 @@ internal class DiscordEvents
             .WithThumbnailUrl(string.IsNullOrEmpty(auditLog.Creator.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : auditLog.Creator.GetAvatarUrl());
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
-        _auditLogIdCache.Add(data.Id);
     }
     
-    private async Task ProcessInviteDeleteAuditLog(RestAuditLogEntry data,SocketGuild guild)
+    private async Task InviteDeleteAuditLogHandler(RestAuditLogEntry data,SocketGuild guild)
     {
         // Find the event
         var ev = _configuration.Events.First(x =>
@@ -271,7 +455,6 @@ internal class DiscordEvents
             .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
-        _auditLogIdCache.Add(data.Id);
     }
     
     internal Task LogAsync(LogMessage log)
