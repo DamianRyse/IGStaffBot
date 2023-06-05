@@ -37,7 +37,21 @@ internal class DiscordEvents
     /// <param name="guild"></param>
     public async Task ReadAuditLogAsync(SocketGuild guild)
     {
+        // TODO: Make sure we have "Read Audit Log" privilege on the target guild and print an error message to the console if not 
+        
+        // First we collect the audit logs
         var auditLog = guild.GetAuditLogsAsync(5).FlattenAsync().Result.OrderBy(x=>x.CreatedAt);
+        
+        // Second we grab the event from our configuration
+        var ev = _configuration.Events.First(x =>
+            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        
+        // TODO: Make sure we have write access to the destination channel and print an error to the console if not.
+        
+        // Now we loop through the event logs and cast each log entry to their specific type. If a type fits the audit
+        // log, we pass the variables to the handler function which then will process the audit log data and post the
+        // Discord message accordingly. If there's no audit log specific type defined, we just simply post the most
+        // basic information to the Discord that are available to us.
         foreach (var log in auditLog)
         {
             // If the ulong is already present in the cache, we skip this one.
@@ -47,43 +61,43 @@ internal class DiscordEvents
             switch (log.Data)
             {
                 case GuildUpdateAuditLogData:
-                    await GuildUpdateAuditLogHandler(log, guild);
+                    await GuildUpdateAuditLogHandler(log, guild,ev);
                     break;
                 case ChannelCreateAuditLogData:
-                    await ChannelCreateAuditLogHandler(log, guild);
+                    await ChannelCreateAuditLogHandler(log,ev);
                     break;
                 case ChannelUpdateAuditLogData:
-                    await ChannelUpdateAuditLogHandler(log, guild);
+                    await ChannelUpdateAuditLogHandler(log, ev);
                     break;
                 case ChannelDeleteAuditLogData:
-                    await ChannelDeleteAuditLogHandler(log, guild);
+                    await ChannelDeleteAuditLogHandler(log, ev);
                     break;
                 case OverwriteCreateAuditLogData:
-                    await OverwriteCreateAuditLogHandler(log, guild);
+                    await OverwriteCreateAuditLogHandler(log, guild,ev);
                     break;
                 case OverwriteUpdateAuditLogData:
-                    await OverwriteUpdateAuditLogHandler(log, guild);
+                    await OverwriteUpdateAuditLogHandler(log, guild,ev);
                     break;
                 case OverwriteDeleteAuditLogData:
-                    await OverwriteDeleteAuditLogHandler(log, guild);
+                    await OverwriteDeleteAuditLogHandler(log, guild,ev);
                     break;
                 case KickAuditLogData:
-                    await KickAuditLogHandler(log,guild);
+                    await KickAuditLogHandler(log, ev);
                     break;
                 case PruneAuditLogData:
-                    await PruneAuditLogHandler(log, guild);
+                    await PruneAuditLogHandler(log, ev);
                     break;
                 case BanAuditLogData:
-                    await BanAuditLogHandler(log, guild);
+                    await BanAuditLogHandler(log, ev);
                     break;
                 case UnbanAuditLogData:
-                    await UnbanAuditLogHandler(log, guild);
+                    await UnbanAuditLogHandler(log, ev);
                     break;
                 case MemberUpdateAuditLogData:
-                    await MemberUpdateAuditLogHandler(log, guild);
+                    await MemberUpdateAuditLogHandler(log,ev);
                     break;
                 case MemberRoleAuditLogData:
-                    await MemberRoleAuditLogHandler(log,guild);
+                    await MemberRoleAuditLogHandler(log,ev);
                     break;
                 // Move Member
                 // Disconnect Member
@@ -91,16 +105,18 @@ internal class DiscordEvents
                 // Create Thread
                 // Update Thread
                 // Delete Thread
-                // Create role
+                case RoleCreateAuditLogData:
+                    await RoleCreateAuditLogHandler(log, guild, ev);
+                    break;
                 case RoleUpdateAuditLogData:
-                    await RoleUpdateAuditLogHandler(log, guild);
+                    await RoleUpdateAuditLogHandler(log, guild, ev);
                     break;
                 // Delete role
                 case InviteCreateAuditLogData:
-                    await InviteCreatedLogHandler(log,guild);
+                    await InviteCreatedLogHandler(log,guild, ev);
                     break;
                 case InviteDeleteAuditLogData:
-                    await InviteDeleteAuditLogHandler(log, guild);
+                    await InviteDeleteAuditLogHandler(log, guild, ev);
                     break;
                 // Create Webhook
                 // Update Webhook
@@ -136,10 +152,6 @@ internal class DiscordEvents
                 // Delete Soundboard Sound
         
                 default:
-                    // Find the event
-                    var ev = _configuration.Events.First(x =>
-                        x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-                    
                     // Get the guilds and users
                     var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
                     var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
@@ -155,18 +167,14 @@ internal class DiscordEvents
         }
     }
 
-    private async Task ChannelCreateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task ChannelCreateAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (ChannelCreateAuditLogData)data.Data;
 
         // Get the guilds, channels and users
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // create the embed for the message
         var emb = new EmbedBuilder();
@@ -175,7 +183,7 @@ internal class DiscordEvents
                              $"**Type:** {auditLog.ChannelType}\n" +
                              $"**Channel ID:** {auditLog.ChannelId}\n" +
                              $"**NSFW:** {(auditLog.IsNsfw.HasValue ? (auditLog.IsNsfw.Value ? "Yes" : "No") : "n/a")}\n" +
-                             $"**Audio bitrate:** {(auditLog.Bitrate.HasValue ? auditLog.Bitrate.Value + " kbps" : "n/a")}\n" +
+                             $"**Audio bitrate:** {(auditLog.Bitrate.HasValue ? auditLog.Bitrate.Value + " bps" : "n/a")}\n" +
                              $"**Slow mode:** {(auditLog.SlowModeInterval.HasValue ? auditLog.SlowModeInterval.Value + " s" : "n/a")}")
                             // TODO: add the permission overwrites
             .WithColor(Color.Green)
@@ -184,25 +192,21 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task ChannelUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task ChannelUpdateAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (ChannelUpdateAuditLogData)data.Data;
 
         // Get the guilds, channels and users
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         //Prepare changelog
         var changelog = new StringBuilder();
         if (auditLog.Before.Name != auditLog.After.Name)
             changelog.AppendLine($"Changed name to: {auditLog.After.Name}");
         if (auditLog.Before.Bitrate.HasValue && auditLog.After.Bitrate.HasValue && (auditLog.Before.Bitrate.Value != auditLog.After.Bitrate.Value))
-            changelog.AppendLine($"Changed bitrate to: {auditLog.After.Bitrate.Value} kbps");
+            changelog.AppendLine($"Changed bitrate to: {auditLog.After.Bitrate.Value} bps");
         if (auditLog.Before.IsNsfw.HasValue && auditLog.After.IsNsfw.HasValue && (auditLog.Before.IsNsfw.Value != auditLog.After.IsNsfw.Value))
             changelog.AppendLine(auditLog.After.IsNsfw.Value ? "Turned on NSFW mode" : "Turned off NSFW mode");
         if (auditLog.Before.SlowModeInterval.HasValue && auditLog.After.SlowModeInterval.HasValue && 
@@ -223,18 +227,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task ChannelDeleteAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task ChannelDeleteAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (ChannelDeleteAuditLogData)data.Data;
 
         // Get the guilds, channels and users
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // create the embed for the message
         var emb = new EmbedBuilder();
@@ -248,18 +248,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task OverwriteCreateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task OverwriteCreateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (OverwriteCreateAuditLogData)data.Data;
 
         // Get the guilds, channels and users
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // create the embed for the message
         var emb = new EmbedBuilder();
@@ -271,18 +267,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task OverwriteUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task OverwriteUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (OverwriteUpdateAuditLogData)data.Data;
 
         // Get the guilds, channels and users
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // create the embed for the message
         var emb = new EmbedBuilder();
@@ -294,18 +286,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
 
-    private async Task OverwriteDeleteAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task OverwriteDeleteAuditLogHandler(RestAuditLogEntry data, SocketGuild guild, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (OverwriteDeleteAuditLogData)data.Data;
 
         // Get the guilds, channels and users
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // create the embed for the message
         var emb = new EmbedBuilder();
@@ -317,18 +305,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task PruneAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task PruneAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (PruneAuditLogData)data.Data;
 
         // Get the guilds, channels and users
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // create the embed for the message
         var emb = new EmbedBuilder();
@@ -341,18 +325,36 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task RoleUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task RoleCreateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
+        // Convert the Audit Log to it's class
+        var auditLog = (RoleCreateAuditLogData)data.Data;
+
+        // Get the guilds and channels
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"{data.User.Username} created role: {auditLog.Properties.Name}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
+                             $"**Role ID:** {auditLog.RoleId}\n" +
+                             $"{(auditLog.Properties.Mentionable.HasValue ? (auditLog.Properties.Mentionable.Value ? "Is mentionable\n" : "Not mentionable\n") : "")}" +
+                             $"**Color**: {(auditLog.Properties.Color.HasValue ? auditLog.Properties.Color.Value : "n/a")}")
+            .WithColor(Color.Green)
+            .WithImageUrl(guild.IconUrl);
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task RoleUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild, Configuration.Event discordEvent)
+    {
         // Convert the Audit Log to it's class
         var auditLog = (RoleUpdateAuditLogData)data.Data;
 
         // Get the guilds and channels
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // Compare the changes and add only the changed objects to a StringBuilder
         var changelog = new StringBuilder();
@@ -462,24 +464,20 @@ internal class DiscordEvents
         emb.WithTitle($"{data.User.Username} updated role: {auditLog.Before.Name}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"{changelog.ToString()}")
-            .WithColor(Color.Red)
+            .WithColor(Color.Gold)
             .WithImageUrl(guild.IconUrl);
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task BanAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task BanAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (BanAuditLogData)data.Data;
 
         // Get the guilds, channels and users
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // create the embed for the message
         var emb = new EmbedBuilder();
@@ -492,18 +490,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task UnbanAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task UnbanAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (UnbanAuditLogData)data.Data;
 
         // Get the guilds, channels and users
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // create the embed for the message
         var emb = new EmbedBuilder();
@@ -516,18 +510,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task MemberRoleAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task MemberRoleAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (MemberRoleAuditLogData)data.Data;
 
         // Get the guilds, channels and users
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // Prep a list of changed roles and add a + or - sign to indicate if they got added or removed
         var changelog = new StringBuilder();
@@ -547,18 +537,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task KickAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task KickAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (KickAuditLogData)data.Data;
 
         // Get the guilds and channels
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
 
         // create the embed for the message
         var emb = new EmbedBuilder();
@@ -571,18 +557,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task MemberUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task MemberUpdateAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (MemberUpdateAuditLogData)data.Data;
 
         // Get the guilds and channels
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // Compare the changes and add only the changed objects to a StringBuilder
         var changelog = new StringBuilder();
@@ -607,18 +589,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
    
-    private async Task GuildUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild)
+    private async Task GuildUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (GuildUpdateAuditLogData)data.Data;
 
         // Get the guilds and channels
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // Compare the changes and add only the changed objects to a StringBuilder
         var changelog = new StringBuilder();
@@ -651,18 +629,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task InviteCreatedLogHandler(RestAuditLogEntry data,SocketGuild guild)
+    private async Task InviteCreatedLogHandler(RestAuditLogEntry data,SocketGuild guild, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (InviteCreateAuditLogData)data.Data;
 
         // Get the guilds and channels
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // create the embed for the message
         var emb = new EmbedBuilder();
@@ -678,18 +652,14 @@ internal class DiscordEvents
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task InviteDeleteAuditLogHandler(RestAuditLogEntry data,SocketGuild guild)
+    private async Task InviteDeleteAuditLogHandler(RestAuditLogEntry data,SocketGuild guild, Configuration.Event discordEvent)
     {
-        // Find the event
-        var ev = _configuration.Events.First(x =>
-            x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
-        
         // Convert the Audit Log to it's class
         var auditLog = (InviteDeleteAuditLogData)data.Data;
         
         // Get the guilds and channels
-        var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
-        var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
         
         // create the embed for the message
         var emb = new EmbedBuilder();
@@ -697,7 +667,7 @@ internal class DiscordEvents
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"**In Discord:** {guild.Name}\n" +
                              $"**In channel:** {guild.GetChannel(auditLog.ChannelId).Name}\n" +
-                             $"**Created by:** {auditLog.Creator.Username}" +
+                             $"**Created by:** {auditLog.Creator.Username}\n" +
                              $"**Usages:** {auditLog.Uses}/{auditLog.MaxUses}\n" +
                              $"**Valid until:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime.AddSeconds(auditLog.MaxAge)).ToString()}")
             .WithColor(Color.Gold)
