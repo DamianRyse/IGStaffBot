@@ -40,7 +40,7 @@ internal class DiscordEvents
         // TODO: Make sure we have "Read Audit Log" privilege on the target guild and print an error message to the console if not 
         
         // First we collect the audit logs
-        var auditLog = guild.GetAuditLogsAsync(5).FlattenAsync().Result.OrderBy(x=>x.CreatedAt);
+        var auditLog = guild.GetAuditLogsAsync(100).FlattenAsync().Result.OrderBy(x=>x.CreatedAt);
         
         // Second we grab the event from our configuration
         var ev = _configuration.Events.First(x =>
@@ -57,8 +57,9 @@ internal class DiscordEvents
             // If the ulong is already present in the cache, we skip this one.
             if (_auditLogIdCache.Contains(log.Id))
                 continue;
-            
-            switch (log.Data)
+            try
+            {
+switch (log.Data)
             {
                 case GuildUpdateAuditLogData:
                     await GuildUpdateAuditLogHandler(log, guild,ev);
@@ -99,7 +100,9 @@ internal class DiscordEvents
                 case MemberRoleAuditLogData:
                     await MemberRoleAuditLogHandler(log,ev);
                     break;
-                // Move Member
+                case MemberMoveAuditLogData:
+                    await MemberMoveAuditLogHandler(log, guild, ev);
+                    break;
                 // Disconnect Member
                 // Add Bot
                 // Create Thread
@@ -164,10 +167,23 @@ internal class DiscordEvents
                     var destinationGuild = _client.GetGuild(ev.DestinationDiscordId);
                     var destinationChannel = destinationGuild.GetTextChannel(ev.DestinationChannelId);
                     
+                    // Instantiate a new Embed
+                    var emb = new EmbedBuilder();
+                    emb.WithTitle($"{log.User.Username} performed action: {log.Action}")
+                        .WithDescription($"**Date/Time**: {TimestampTag.FromDateTime(log.CreatedAt.LocalDateTime)}\n" +
+                                         $"*No further information available at this time.*")
+                        .WithColor(Color.DarkPurple)
+                        .WithFooter("Help us improving the bot! - https://github.com/DamianRyse/IGStaffBot");
                     // Post default message
-                    await destinationChannel.SendMessageAsync($"{TimestampTag.FromDateTime(log.CreatedAt.LocalDateTime)} {log.User.Username}: {log.Action} *(Unhandled audit log format)*");
+                    await destinationChannel.SendMessageAsync(embed: emb.Build());
                     break;
             }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+            }
+            
             
             // After handling the audit log, we add the ID to a cache list, so it won't be processed another time
             _auditLogIdCache.Add(log.Id);
@@ -225,7 +241,7 @@ internal class DiscordEvents
 
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} updated a channel: {auditLog.Before.Name}")
+        emb.WithTitle($"🔄 {data.User.Username} updated a channel: {auditLog.Before.Name}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"{changelog.ToString()}")
             .WithColor(Color.Gold)
@@ -245,7 +261,7 @@ internal class DiscordEvents
         
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} deleted a channel: {auditLog.ChannelName}")
+        emb.WithTitle($"⛔ {data.User.Username} deleted a channel: {auditLog.ChannelName}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"**Channel ID:** {auditLog.ChannelId}\n" +
                              $"**Type**: {auditLog.ChannelType}")
@@ -285,7 +301,7 @@ internal class DiscordEvents
         
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} updated channel permissions for: {guild.GetChannel(auditLog.ChannelId)?.Name}")
+        emb.WithTitle($"🔄 {data.User.Username} updated channel permissions for: {guild.GetChannel(auditLog.ChannelId)?.Name}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}")
             .WithColor(Color.Gold)
             .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
@@ -304,7 +320,7 @@ internal class DiscordEvents
         
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} deleted channel permissions for: {guild.GetChannel(auditLog.ChannelId)?.Name}")
+        emb.WithTitle($"⛔ {data.User.Username} deleted channel permissions for: {guild.GetChannel(auditLog.ChannelId)?.Name}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}")
             .WithColor(Color.Red)
             .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
@@ -323,7 +339,7 @@ internal class DiscordEvents
         
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} pruned {auditLog.MembersRemoved} members")
+        emb.WithTitle($"⛔ {data.User.Username} pruned {auditLog.MembersRemoved} members")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"**Threshold days**: {auditLog.PruneDays}")
             .WithColor(Color.Red)
@@ -468,7 +484,7 @@ internal class DiscordEvents
 
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} updated role: {auditLog.Before.Name}")
+        emb.WithTitle($"🔄 {data.User.Username} updated role: {auditLog.Before.Name}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"{changelog.ToString()}")
             .WithColor(Color.Gold)
@@ -488,7 +504,7 @@ internal class DiscordEvents
         
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} deleted role: {auditLog.Properties.Name}")
+        emb.WithTitle($"⛔ {data.User.Username} deleted role: {auditLog.Properties.Name}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}")
             .WithColor(Color.Red)
             .WithImageUrl(guild.IconUrl);
@@ -507,7 +523,7 @@ internal class DiscordEvents
         
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} banned: {auditLog.Target.Username}")
+        emb.WithTitle($"⛔ {data.User.Username} banned: {auditLog.Target.Username}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"**Reason:** {data.Reason}")
             .WithColor(Color.Orange)
@@ -554,10 +570,48 @@ internal class DiscordEvents
 
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} changed roles of member: {auditLog.Target.Username}")
+        emb.WithTitle($"🔄 {data.User.Username} changed roles of member: {auditLog.Target.Username}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              changelog.ToString())
             .WithColor(Color.LightGrey)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task MemberMoveAuditLogHandler(RestAuditLogEntry data, SocketGuild guild, Configuration.Event discordEvent)
+    {
+        // Convert the Audit Log to it's class
+        var auditLog = (MemberMoveAuditLogData)data.Data;
+
+        // Get the guilds, channels and users
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
+
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"🔄 {data.User.Username} moved {auditLog.MemberCount} members to {guild.GetChannel(auditLog.ChannelId).Name}")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}")
+            .WithColor(Color.Gold)
+            .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
+
+        await destinationChannel.SendMessageAsync(embed: emb.Build());
+    }
+    
+    private async Task MemberDisconnectAuditLogHandler(RestAuditLogEntry data, SocketGuild guild, Configuration.Event discordEvent)
+    {
+        // Convert the Audit Log to it's class
+        var auditLog = (MemberDisconnectAuditLogData)data.Data;
+
+        // Get the guilds, channels and users
+        var destinationGuild = _client.GetGuild(discordEvent.DestinationDiscordId);
+        var destinationChannel = destinationGuild.GetTextChannel(discordEvent.DestinationChannelId);
+
+        // create the embed for the message
+        var emb = new EmbedBuilder();
+        emb.WithTitle($"⛔ {data.User.Username} disconnected {auditLog.MemberCount} members from voice channels.")
+            .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}")
+            .WithColor(Color.Red)
             .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
@@ -574,10 +628,10 @@ internal class DiscordEvents
 
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} kicked member: {auditLog.Target.Username}")
+        emb.WithTitle($"⛔ {data.User.Username} kicked member: {auditLog.Target.Username}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"{data.Reason}")
-            .WithColor(Color.LightGrey)
+            .WithColor(Color.Red)
             .WithThumbnailUrl(string.IsNullOrEmpty(data.User.GetAvatarUrl()) ? data.User.GetDefaultAvatarUrl() : data.User.GetAvatarUrl());
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
@@ -606,7 +660,7 @@ internal class DiscordEvents
 
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} updated member: {auditLog.Target.Username}")
+        emb.WithTitle($"🔄 {data.User.Username} updated member: {auditLog.Target.Username}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"{changelog.ToString()}")
             .WithColor(Color.DarkBlue)
@@ -646,10 +700,10 @@ internal class DiscordEvents
 
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} updated guild settings")
+        emb.WithTitle($"🔄 {data.User.Username} updated guild settings")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"{changelog.ToString()}")
-            .WithColor(Color.Red)
+            .WithColor(Color.Gold)
             .WithImageUrl(guild.IconUrl);
 
         await destinationChannel.SendMessageAsync(embed: emb.Build());
@@ -689,7 +743,7 @@ internal class DiscordEvents
         
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} deleted invite code {auditLog.Code}")
+        emb.WithTitle($"⛔ {data.User.Username} deleted invite code {auditLog.Code}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"**In Discord:** {guild.Name}\n" +
                              $"**In channel:** {guild.GetChannel(auditLog.ChannelId).Name}\n" +
@@ -740,7 +794,7 @@ internal class DiscordEvents
 
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"{data.User.Username} updated a webhook: {auditLog.Before.Name}")
+        emb.WithTitle($"🔄 {data.User.Username} updated a webhook: {auditLog.Before.Name}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"**In channel:** {guild.GetChannel(auditLog.Before.ChannelId ?? 0)?.Name}\n" +
                              $"{changelog.ToString()}")

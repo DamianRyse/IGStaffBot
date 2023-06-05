@@ -15,6 +15,11 @@ public class Startup
 
     public async Task Initialize()
     {
+        Console.Title = "IMPULSE GAMING - Audit Logs and Events redirector.";
+        Console.WriteLine($"IMPULSE GAMING - Audit Logs and Events redirector.");
+        Console.WriteLine($"##################################################");
+        Console.WriteLine();
+        
         // Initialize services
         await using var services = ConfigureServices();
         _client = services.GetRequiredService<DiscordSocketClient>();
