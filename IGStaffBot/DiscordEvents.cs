@@ -1,6 +1,4 @@
-﻿using System.Data;
-using System.Runtime.CompilerServices;
-using System.Text;
+﻿using System.Text;
 using Discord;
 using Discord.Rest;
 using Discord.WebSocket;
@@ -12,12 +10,31 @@ internal class DiscordEvents
 {
     private readonly DiscordSocketClient _client;
     private readonly Configuration _configuration;
-    private List<ulong> _auditLogIdCache = new List<ulong>();
+    private readonly Dictionary<ulong, List<ulong>> _auditLogCache = new();
 
     internal DiscordEvents(DiscordSocketClient client, Configuration config)
     {
         _client = client;
         _configuration = config;
+    }
+
+    
+    // TODO: LoadAllCacheFiles() should be called by the constructor and shouldn't use _clients.Guilds.
+    // Use the *.cache files instead to load the cache.
+    private void LoadAllCacheFiles()
+    {
+        // Loop through all Discord guilds
+        foreach (var guildId in _client.Guilds.Select(g => g.Id))
+        {
+            // generate the expected filename and check if the file exists
+            var filename = $"{guildId}.cache";
+            if (!File.Exists(filename))
+                continue;
+            
+            // Load the file and store the contents in the Dictionary
+            if(LoadCacheFromFile(filename) is { } cachedIds)
+                _auditLogCache.Add(guildId,new List<ulong>(cachedIds));
+        }
     }
 
     internal async Task OnReady()
@@ -29,8 +46,48 @@ internal class DiscordEvents
             await guild.DownloadUsersAsync();
             Console.WriteLine($"[{DateTime.UtcNow} UTC] - {guild.Name} ({guild.Users.Count})");
         }
+        
+        LoadAllCacheFiles();
     }
 
+    private static async Task SaveCacheToFile(IEnumerable<ulong> ids, string filePath)
+    {
+        try
+        {
+            await File.WriteAllTextAsync(filePath, String.Join(Environment.NewLine, ids));
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[{DateTime.UtcNow} UTC] Error writing Audit Log Cache to file '{filePath}'");
+            Console.WriteLine($"[{DateTime.UtcNow} UTC] {e.Message}");
+            Console.WriteLine($"[{DateTime.UtcNow} UTC] {e.StackTrace}");
+        }
+    }
+
+    private static ulong[]? LoadCacheFromFile(string filePath)
+    {
+        try
+        {
+            var read = File.ReadLines(filePath);
+            var retVal = new List<ulong>();
+            foreach (var line in read)
+            {
+                if (ulong.TryParse(line, out var id))
+                    retVal.Add(id);
+            }
+
+            return retVal.ToArray();
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[{DateTime.UtcNow} UTC] Error reading Audit Log Cache from file '{filePath}'");
+            Console.WriteLine($"[{DateTime.UtcNow} UTC] {e.Message}");
+            Console.WriteLine($"[{DateTime.UtcNow} UTC] {e.StackTrace}");
+            return null;
+        }
+    }
+    
+    
     /// <summary>
     /// Reads the audit log of a specific guild. It also casts the audit logs into specific types and calls the handler (if available).
     /// </summary>
@@ -46,6 +103,20 @@ internal class DiscordEvents
         var ev = _configuration.Events.First(x =>
             x is { EventType: Configuration.EventType.AuditLog, IsEnabled: true } && x.SourceDiscordId == guild.Id);
         
+        // Third Make sure the Dictionary contains a Key for this guild
+        if (!_auditLogCache.ContainsKey(guild.Id))
+            _auditLogCache.Add(guild.Id,new List<ulong>());
+        
+        // Preserve the old cache for this run.
+        var oldCache = new ulong[_auditLogCache[guild.Id].Count];
+        _auditLogCache[guild.Id].CopyTo(0,oldCache,0,_auditLogCache[guild.Id].Count);  
+        var hasNewValues = false;                                      // Flag if the list contains new elements.
+        
+        // Refresh the cache to the latest audit log IDs. This is necessary to only keep 100 IDs in memory and not 
+        // filling it up with thousands of IDs which are no longer used.
+        _auditLogCache[guild.Id].Clear();
+        _auditLogCache[guild.Id].AddRange( auditLog.Select(a => a.Id));
+        
         // TODO: Make sure we have write access to the destination channel and print an error to the console if not.
         
         // Now we loop through the event logs and cast each log entry to their specific type. If a type fits the audit
@@ -54,12 +125,16 @@ internal class DiscordEvents
         // basic information to the Discord that are available to us.
         foreach (var log in auditLog)
         {
-            // If the ulong is already present in the cache, we skip this one.
-            if (_auditLogIdCache.Contains(log.Id))
+            // If the log ID is already present in the cache, we skip this one.
+            if(oldCache.Contains(log.Id))
                 continue;
+            
+            // Apparently we have a new log now. Set the flag
+            hasNewValues = true;
+            
             try
-            {
-switch (log.Data)
+            { 
+                switch (log.Data)
             {
                 case GuildUpdateAuditLogData:
                     await GuildUpdateAuditLogHandler(log, guild,ev);
@@ -68,7 +143,7 @@ switch (log.Data)
                     await ChannelCreateAuditLogHandler(log,ev);
                     break;
                 case ChannelUpdateAuditLogData:
-                    await ChannelUpdateAuditLogHandler(log, ev);
+                    await ChannelUpdateAuditLogHandler(log, guild, ev);
                     break;
                 case ChannelDeleteAuditLogData:
                     await ChannelDeleteAuditLogHandler(log, ev);
@@ -183,11 +258,13 @@ switch (log.Data)
             {
                 Console.WriteLine(e);
             }
-            
-            
-            // After handling the audit log, we add the ID to a cache list, so it won't be processed another time
-            _auditLogIdCache.Add(log.Id);
         }
+        
+        if (hasNewValues)
+            // Save cache to file
+            await SaveCacheToFile(_auditLogCache[guild.Id],$"{guild.Id}.cache");
+        
+        
     }
 
     private async Task ChannelCreateAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
@@ -215,7 +292,7 @@ switch (log.Data)
         await destinationChannel.SendMessageAsync(embed: emb.Build());
     }
     
-    private async Task ChannelUpdateAuditLogHandler(RestAuditLogEntry data, Configuration.Event discordEvent)
+    private async Task ChannelUpdateAuditLogHandler(RestAuditLogEntry data, SocketGuild guild , Configuration.Event discordEvent)
     {
         // Convert the Audit Log to it's class
         var auditLog = (ChannelUpdateAuditLogData)data.Data;
@@ -227,21 +304,21 @@ switch (log.Data)
         //Prepare changelog
         var changelog = new StringBuilder();
         if (auditLog.Before.Name != auditLog.After.Name)
-            changelog.AppendLine($"Changed name to: {auditLog.After.Name}");
+            changelog.AppendLine($"**Changed name to:** {auditLog.After.Name}");
         if (auditLog.Before.Bitrate.HasValue && auditLog.After.Bitrate.HasValue && (auditLog.Before.Bitrate.Value != auditLog.After.Bitrate.Value))
-            changelog.AppendLine($"Changed bitrate to: {auditLog.After.Bitrate.Value} bps");
+            changelog.AppendLine($"**Changed bitrate to:** {auditLog.After.Bitrate.Value} bps");
         if (auditLog.Before.IsNsfw.HasValue && auditLog.After.IsNsfw.HasValue && (auditLog.Before.IsNsfw.Value != auditLog.After.IsNsfw.Value))
-            changelog.AppendLine(auditLog.After.IsNsfw.Value ? "Turned on NSFW mode" : "Turned off NSFW mode");
+            changelog.AppendLine(auditLog.After.IsNsfw.Value ? "**Turned on NSFW mode**" : "**Turned off NSFW mode**");
         if (auditLog.Before.SlowModeInterval.HasValue && auditLog.After.SlowModeInterval.HasValue && 
             auditLog.Before.SlowModeInterval.Value != auditLog.After.SlowModeInterval.Value)
-            changelog.AppendLine($"Changed slow mode delay to {auditLog.After.SlowModeInterval.Value} seconds");
+            changelog.AppendLine($"**Changed slow mode delay** to {auditLog.After.SlowModeInterval.Value} seconds");
         if (auditLog.Before.Topic != auditLog.After.Topic)
-            changelog.AppendLine($"Changed the topic to: {auditLog.After.Topic}");
+            changelog.AppendLine($"**Changed the topic to**: {auditLog.After.Topic}");
 
 
         // create the embed for the message
         var emb = new EmbedBuilder();
-        emb.WithTitle($"🔄 {data.User.Username} updated a channel: {auditLog.Before.Name}")
+        emb.WithTitle($"🔄 {data.User.Username} updated a channel: {guild.GetChannel(auditLog.ChannelId)?.Name}")
             .WithDescription($"**Date/Time:** {TimestampTag.FromDateTime(data.CreatedAt.LocalDateTime)}\n" +
                              $"{changelog.ToString()}")
             .WithColor(Color.Gold)
