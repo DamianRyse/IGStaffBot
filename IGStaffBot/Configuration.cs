@@ -7,12 +7,10 @@ namespace IGStaffBot;
 public class Configuration
 {
     [JsonPropertyName("B64_DiscordToken")]
-    public string DiscordToken { get; set; }
+    public string? DiscordToken { get; set; }
 
-    public List<Event> Events { get; set; }
-    public ulong AuditLogDestinationGuildId { get; set; }
-    public ulong AuditLogDestinationChannelId { get; set; }
-
+    public List<Event>? Events { get; set; }
+    
    
     /// <summary>
     /// Reads the configuration file and deserializes it to a Configuration class object.
@@ -30,18 +28,22 @@ public class Configuration
         using var file = File.OpenText(filePath);
         try
         {
-            return JsonSerializer.Deserialize<Configuration>(file.ReadToEnd(), options);
+            var retVal = JsonSerializer.Deserialize<Configuration>(file.ReadToEnd(), options);
+            if (retVal is not null)
+                return retVal;
+
         }
         catch(Exception ex)
         {
             Console.WriteLine($"[{DateTime.UtcNow} UTC] {ex.Message}");
             Console.WriteLine($"[{DateTime.UtcNow} UTC] {ex.StackTrace}");
-            return new Configuration
-            {
-                DiscordToken = "NO_DISCORD_TOKEN",
-                Events = new List<Event>()
-            };
         }
+        
+        return new Configuration
+        {
+            DiscordToken = "NO_DISCORD_TOKEN",
+            Events = new List<Event>()
+        };
     }
 
     public enum EventType
